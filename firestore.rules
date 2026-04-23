@@ -1,0 +1,117 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Core Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { 
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    // --- Entity Validators ---
+    function isValidUser(data, userId) {
+      return data.keys().hasAll(['email', 'createdAt']) && 
+             data.keys().size() == 2 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.createdAt == request.time;
+    }
+
+    function isValidItem(data, userId) {
+      return data.keys().hasAll(['name', 'category', 'imageUrl', 'weatherTags', 'userId', 'createdAt']) &&
+             (!('isFavorite' in data) || data.isFavorite is bool) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.category is string && data.category.size() > 0 && data.category.size() <= 50 &&
+             data.imageUrl is string && data.imageUrl.size() <= 5000000 &&
+             data.weatherTags is list && data.weatherTags.size() <= 10 &&
+             data.userId == userId &&
+             data.createdAt == request.time;
+    }
+
+    function isValidOutfit(data, userId) {
+      return data.keys().hasAll(['name', 'itemIds', 'userId', 'createdAt']) &&
+             (!('isFavorite' in data) || data.isFavorite is bool) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
+             data.itemIds is list && data.itemIds.size() <= 100 &&
+             data.userId == userId &&
+             data.createdAt == request.time;
+    }
+
+    function isValidLog(data, userId) {
+      return data.keys().hasAll(['date', 'outfitId', 'userId', 'createdAt']) &&
+             data.date is string && data.date.size() <= 50 &&
+             data.outfitId is string && data.outfitId.size() > 0 && data.outfitId.size() <= 150 &&
+             data.userId == userId &&
+             data.createdAt == request.time;
+    }
+
+    // --- Match Rules ---
+
+    // USERS
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(userId) && isValidUser(incoming(), userId);
+      // Immutable profile here
+      allow update: if false;
+      allow delete: if isOwner(userId);
+
+      // ITEMS
+      match /items/{itemId} {
+        allow read: if isOwner(userId) && isValidId(itemId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(itemId) && isValidItem(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(itemId) && (
+          (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'imageUrl', 'weatherTags']) &&
+          incoming().name is string && incoming().name.size() <= 100 &&
+          incoming().category is string && incoming().category.size() <= 50 &&
+          incoming().imageUrl is string && incoming().imageUrl.size() <= 5000000 &&
+          incoming().weatherTags is list && incoming().weatherTags.size() <= 10) ||
+          (incoming().diff(existing()).affectedKeys().hasOnly(['isFavorite']) &&
+          incoming().isFavorite is bool) ||
+          (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'imageUrl', 'weatherTags', 'isFavorite']) &&
+          incoming().name is string && incoming().name.size() <= 100 &&
+          incoming().category is string && incoming().category.size() <= 50 &&
+          incoming().imageUrl is string && incoming().imageUrl.size() <= 5000000 &&
+          incoming().weatherTags is list && incoming().weatherTags.size() <= 10 &&
+          incoming().isFavorite is bool)
+        );
+        allow delete: if isOwner(userId) && isValidId(itemId);
+      }
+
+      // OUTFITS
+      match /outfits/{outfitId} {
+        allow read: if isOwner(userId) && isValidId(outfitId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(outfitId) && isValidOutfit(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(outfitId) && (
+          (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'itemIds']) &&
+          incoming().name is string && incoming().name.size() <= 100 &&
+          incoming().itemIds is list && incoming().itemIds.size() <= 50) ||
+          (incoming().diff(existing()).affectedKeys().hasOnly(['isFavorite']) &&
+          incoming().isFavorite is bool) ||
+          (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'itemIds', 'isFavorite']) &&
+          incoming().name is string && incoming().name.size() <= 100 &&
+          incoming().itemIds is list && incoming().itemIds.size() <= 50 &&
+          incoming().isFavorite is bool)
+        );
+        allow delete: if isOwner(userId) && isValidId(outfitId);
+      }
+
+      // LOGS
+      match /logs/{logId} {
+        allow read: if isOwner(userId) && isValidId(logId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isOwner(userId) && isValidId(logId) && isValidLog(incoming(), userId);
+        allow update: if false; // Logs are immutable, delete and recreate if needed
+        allow delete: if isOwner(userId) && isValidId(logId);
+      }
+    }
+  }
+}
