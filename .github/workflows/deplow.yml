@@ -23,11 +23,11 @@ jobs:
 
       - name: Install dependencies  # remove if plain HTML
         run: npm install
-        env:
-           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
 
       - name: Build                 # change to your build command
         run: npm run build
+        env:
+           VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
